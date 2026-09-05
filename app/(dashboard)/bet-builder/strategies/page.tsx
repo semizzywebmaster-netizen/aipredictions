@@ -1,0 +1,2 @@
+import { Card, CardContent } from '@/components/ui/card'
+export default function Page() { return <div className="space-y-6"><h1 className="text-2xl font-bold">Strategies & Target Odds</h1><Card><CardContent className="p-6 text-sm text-muted-foreground">Conservative, Balanced, Aggressive • Target odds 2,5,10,20,50,100,custom • Warn that target odds do not guarantee outcomes • API: /api/v1/bet-builder/strategies</CardContent></Card></div> }
