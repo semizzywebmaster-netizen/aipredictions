@@ -17,6 +17,7 @@ export class ApiError extends Error {
   status: number
   code?: string
   details?: unknown
+
   constructor(message: string, status: number, code?: string, details?: unknown) {
     super(message)
     this.name = 'ApiError'
@@ -40,6 +41,32 @@ function buildUrl(endpoint: string, params?: ApiClientOptions['params']): string
 
   const query = search.toString()
   return query ? `${url}?${query}` : url
+}
+
+function extractError(payload: unknown, status: number): { message: string; code?: string } {
+  if (!payload || typeof payload !== 'object') {
+    return { message: `Request failed with ${status}` }
+  }
+
+  const body = payload as Record<string, unknown>
+  const nested = body.error && typeof body.error === 'object'
+    ? body.error as Record<string, unknown>
+    : undefined
+
+  const message = [body.message, nested?.message]
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+
+  const code = [body.code, nested?.code]
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+
+  if (message) return { message, code }
+
+  if (Array.isArray(body.errors)) {
+    const first = body.errors.find((item) => typeof item === 'string')
+    if (typeof first === 'string' && first.trim()) return { message: first, code }
+  }
+
+  return { message: `Request failed with ${status}`, code }
 }
 
 function mergeAbortSignals(signal: AbortSignal | undefined, timeoutMs: number): {
@@ -111,11 +138,7 @@ export async function apiClient<T>(endpoint: string, options: ApiClientOptions =
       : await response.text().catch(() => '')
 
     if (!response.ok) {
-      const errorBody = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
-      const message = typeof errorBody.message === 'string'
-        ? errorBody.message
-        : `Request failed with ${response.status}`
-      const code = typeof errorBody.code === 'string' ? errorBody.code : undefined
+      const { message, code } = extractError(payload, response.status)
       throw new ApiError(message, response.status, code, payload)
     }
 
