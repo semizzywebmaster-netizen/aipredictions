@@ -10,6 +10,7 @@ export interface ApiClientOptions {
   signal?: AbortSignal
   cache?: RequestCache
   next?: NextFetchRequestConfig
+  timeoutMs?: number
 }
 
 export class ApiError extends Error {
@@ -26,74 +27,114 @@ export class ApiError extends Error {
 }
 
 function buildUrl(endpoint: string, params?: ApiClientOptions['params']): string {
-  const url = endpoint.startsWith('http') ? endpoint : `${env.apiUrl}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`
+  const url = endpoint.startsWith('http')
+    ? endpoint
+    : `${env.apiUrl}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`
+
   if (!params) return url
+
   const search = new URLSearchParams()
-  Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== '') search.set(k, String(v))
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') search.set(key, String(value))
   })
-  const qs = search.toString()
-  return qs ? `${url}?${qs}` : url
+
+  const query = search.toString()
+  return query ? `${url}?${query}` : url
+}
+
+function mergeAbortSignals(signal: AbortSignal | undefined, timeoutMs: number): {
+  signal: AbortSignal
+  cleanup: () => void
+  timedOut: () => boolean
+} {
+  const controller = new AbortController()
+  let didTimeout = false
+  const timeout = setTimeout(() => {
+    didTimeout = true
+    controller.abort()
+  }, timeoutMs)
+
+  const abortFromCaller = () => controller.abort()
+  signal?.addEventListener('abort', abortFromCaller, { once: true })
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeout)
+      signal?.removeEventListener('abort', abortFromCaller)
+    },
+    timedOut: () => didTimeout,
+  }
 }
 
 export async function apiClient<T>(endpoint: string, options: ApiClientOptions = {}): Promise<T> {
-  const { method = 'GET', headers = {}, body, params, signal, cache, next } = options
-
-  const url = buildUrl(endpoint, params)
-
-  const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
-
-  const reqHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-    ...headers,
-  }
-  if (token) reqHeaders.Authorization = `Bearer ${token}`
-
-  const config: RequestInit & { next?: NextFetchRequestConfig } = {
-    method,
-    headers: reqHeaders,
+  const {
+    method = 'GET',
+    headers = {},
+    body,
+    params,
     signal,
     cache,
     next,
+    timeoutMs = 15000,
+  } = options
+
+  const url = buildUrl(endpoint, params)
+  const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
+
+  const reqHeaders: Record<string, string> = {
+    Accept: 'application/json',
+    ...headers,
   }
 
-  if (body && method !== 'GET') {
-    config.body = JSON.stringify(body)
+  if (body !== undefined && method !== 'GET') {
+    reqHeaders['Content-Type'] = 'application/json'
   }
 
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 15000)
+  if (token) reqHeaders.Authorization = `Bearer ${token}`
+
+  const abort = mergeAbortSignals(signal, timeoutMs)
 
   try {
     const response = await fetch(url, {
-      ...config,
-      signal: signal || controller.signal,
+      method,
+      headers: reqHeaders,
+      signal: abort.signal,
+      cache,
+      next,
+      ...(body !== undefined && method !== 'GET' ? { body: JSON.stringify(body) } : {}),
     })
 
-    clearTimeout(timeout)
+    const contentType = response.headers.get('content-type') || ''
+    const payload = contentType.includes('application/json')
+      ? await response.json().catch(() => null)
+      : await response.text().catch(() => '')
 
     if (!response.ok) {
-      const errorBody = await response.json().catch(() => ({}))
-      throw new ApiError(
-        errorBody.message || `Request failed with ${response.status}`,
-        response.status,
-        errorBody.code,
-        errorBody
-      )
+      const errorBody = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+      const message = typeof errorBody.message === 'string'
+        ? errorBody.message
+        : `Request failed with ${response.status}`
+      const code = typeof errorBody.code === 'string' ? errorBody.code : undefined
+      throw new ApiError(message, response.status, code, payload)
     }
 
-    const data = await response.json().catch(() => null)
-    return data as T
+    // 204 No Content and empty successful responses are valid.
+    return (payload === '' || payload === null ? undefined : payload) as T
   } catch (err) {
-    clearTimeout(timeout)
     if (err instanceof ApiError) throw err
-    if ((err as Error).name === 'AbortError') throw new ApiError('Request timeout', 408, 'TIMEOUT')
+
+    if ((err as Error).name === 'AbortError') {
+      if (abort.timedOut()) throw new ApiError('Request timeout', 408, 'TIMEOUT')
+      throw new ApiError('Request cancelled', 499, 'REQUEST_CANCELLED')
+    }
+
     throw new ApiError((err as Error).message || 'Network error', 0, 'NETWORK_ERROR')
+  } finally {
+    abort.cleanup()
   }
 }
 
-// Typed helpers
 export const api = {
   get: <T>(endpoint: string, opts?: ApiClientOptions) => apiClient<T>(endpoint, { ...opts, method: 'GET' }),
   post: <T>(endpoint: string, body?: unknown, opts?: ApiClientOptions) => apiClient<T>(endpoint, { ...opts, method: 'POST', body }),
