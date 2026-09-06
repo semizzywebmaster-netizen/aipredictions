@@ -124,8 +124,29 @@ model League {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   sport Sport @relation(fields: [sportId], references: [id], onDelete: Cascade)
+  teams Team[]
   @@unique([sportId, slug])
   @@index([sportId])
   @@index([isActive])
   @@map("leagues")
+}
+
+model Team {
+  id Int @id @default(autoincrement())
+  leagueId Int
+  name String @db.VarChar(150)
+  slug String @db.VarChar(150)
+  shortName String? @db.VarChar(50)
+  country String? @db.VarChar(100)
+  logoUrl String? @db.VarChar(500)
+  externalId String? @db.VarChar(100)
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  @@unique([leagueId, slug])
+  @@index([leagueId])
+  @@index([isActive])
+  @@index([externalId])
+  @@map("teams")
 }
