@@ -5,11 +5,13 @@ import { prisma } from '../lib/prisma'
 import { hashPassword, verifyPassword } from '../utils/password'
 import { createAccessToken } from '../utils/jwt'
 import { requireAuth } from '../middleware/auth'
+import { sendVerificationEmail } from '../services/email'
 
 const router = Router()
 const registerSchema = z.object({ email: z.string().trim().toLowerCase().email().max(191), password: z.string().min(8).max(128), firstName: z.string().trim().min(1).max(100).optional(), lastName: z.string().trim().min(1).max(100).optional(), phone: z.string().trim().min(7).max(32).optional() })
 const loginSchema = z.object({ email: z.string().trim().toLowerCase().email().max(191), password: z.string().min(1).max(128) })
 const refreshSchema = z.object({ refreshToken: z.string().min(32).max(512) })
+const verifyEmailSchema = z.object({ code: z.string().trim().min(32).max(512) })
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex')
 
 const registerHandler: RequestHandler = async (req, res, next) => {
@@ -21,8 +23,15 @@ const registerHandler: RequestHandler = async (req, res, next) => {
     if (existing) { const field = existing.email === email ? 'email' : 'phone'; res.status(409).json({ success: false, error: { code: 'ACCOUNT_EXISTS', message: `An account with this ${field} already exists.` } }); return }
     const passwordHash = await hashPassword(password)
     const user = await prisma.user.create({ data: { email, phone, passwordHash, firstName, lastName }, select: { id: true, email: true, phone: true, firstName: true, lastName: true, role: true, status: true, emailVerifiedAt: true, phoneVerifiedAt: true, createdAt: true } })
+
+    const verificationCode = randomBytes(32).toString('base64url')
+    await prisma.authToken.create({ data: { userId: user.id, tokenHash: hashToken(verificationCode), type: 'EMAIL_VERIFICATION', expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) } })
     await prisma.auditLog.create({ data: { userId: user.id, action: 'AUTH_REGISTER', entity: 'User', entityId: String(user.id), ipAddress: req.ip, userAgent: req.get('user-agent') ?? undefined } })
-    res.status(201).json({ success: true, data: { user, message: 'Account created successfully. Please verify your account when verification is enabled.' } })
+
+    let verificationSent = false
+    try { verificationSent = await sendVerificationEmail(user.email, user.firstName, verificationCode) } catch { verificationSent = false }
+
+    res.status(201).json({ success: true, data: { user, message: verificationSent ? 'Account created successfully. Please check your email to verify your account.' : 'Account created successfully. Email verification is pending configuration.' } })
   } catch (error) { next(error) }
 }
 
@@ -58,6 +67,22 @@ const refreshHandler: RequestHandler = async (req, res, next) => {
   } catch (error) { next(error) }
 }
 
+const verifyEmailHandler: RequestHandler = async (req, res, next) => {
+  try {
+    const parsed = verifyEmailSchema.safeParse(req.body)
+    if (!parsed.success) { res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'A valid verification code is required.' } }); return }
+    const tokenHash = hashToken(parsed.data.code)
+    const token = await prisma.authToken.findUnique({ where: { tokenHash }, include: { user: true } })
+    if (!token || token.type !== 'EMAIL_VERIFICATION' || token.consumedAt || token.expiresAt <= new Date()) { res.status(400).json({ success: false, error: { code: 'INVALID_VERIFICATION_CODE', message: 'The verification code is invalid or expired.' } }); return }
+    await prisma.$transaction([
+      prisma.authToken.update({ where: { id: token.id }, data: { consumedAt: new Date() } }),
+      prisma.user.update({ where: { id: token.userId }, data: { emailVerifiedAt: new Date() } }),
+      prisma.auditLog.create({ data: { userId: token.userId, action: 'AUTH_EMAIL_VERIFIED', entity: 'User', entityId: String(token.userId), ipAddress: req.ip, userAgent: req.get('user-agent') ?? undefined } }),
+    ])
+    res.json({ success: true, data: { message: 'Email verified successfully.' } })
+  } catch (error) { next(error) }
+}
+
 const meHandler: RequestHandler = async (req, res, next) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: Number(req.auth?.sub) }, select: { id: true, email: true, phone: true, firstName: true, lastName: true, role: true, status: true, emailVerifiedAt: true, phoneVerifiedAt: true, lastLoginAt: true, createdAt: true } })
@@ -79,6 +104,7 @@ const logoutHandler: RequestHandler = async (req, res, next) => {
 router.post('/register', registerHandler)
 router.post('/login', loginHandler)
 router.post('/refresh', refreshHandler)
+router.post('/verify-email', verifyEmailHandler)
 router.get('/me', requireAuth, meHandler)
 router.post('/logout', requireAuth, logoutHandler)
 
