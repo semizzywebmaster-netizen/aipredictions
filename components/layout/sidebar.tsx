@@ -2,10 +2,22 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { Logo } from '@/components/brand/logo'
-import { LayoutDashboard, Trophy, Dribbble, BarChart3, Calculator, Code2, Wallet, Crown, Bot, Users, Bell, Settings, Shield } from 'lucide-react'
+import { LayoutDashboard, Trophy, Dribbble, BarChart3, Calculator, Code2, Wallet, Crown, Bot, Users, Bell, Settings, Shield, type LucideIcon } from 'lucide-react'
 
-const sidebarGroups = [
+type SidebarItem = {
+  href: string
+  label: string
+  icon: LucideIcon
+  sport?: 'football' | 'basketball'
+  adminOnly?: boolean
+}
+
+type SidebarGroup = {
+  title: string
+  items: SidebarItem[]
+}
+
+const sidebarGroups: SidebarGroup[] = [
   { title: 'Overview', items: [
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { href: '/football', label: 'Football', icon: Trophy, sport: 'football' },
