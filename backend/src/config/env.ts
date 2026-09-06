@@ -9,6 +9,12 @@ const envSchema = z.object({
   FRONTEND_URL: z.string().url().default('http://localhost:3000'),
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
+  SMTP_HOST: z.string().min(1).optional(),
+  SMTP_PORT: z.coerce.number().int().positive().default(587),
+  SMTP_USER: z.string().min(1).optional(),
+  SMTP_PASSWORD: z.string().min(1).optional(),
+  SMTP_FROM: z.string().email().optional(),
+  EMAIL_VERIFICATION_URL: z.string().url().default('http://localhost:3000/verify-email'),
 })
 
 const parsed = envSchema.safeParse(process.env)
@@ -19,3 +25,7 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data
+
+export const emailConfig = {
+  enabled: Boolean(parsed.data.SMTP_HOST && parsed.data.SMTP_USER && parsed.data.SMTP_PASSWORD && parsed.data.SMTP_FROM),
+}
