@@ -2,6 +2,7 @@ import cors from 'cors'
 import express, { type ErrorRequestHandler, type RequestHandler } from 'express'
 import helmet from 'helmet'
 import { env } from './config/env'
+import authRouter from './routes/auth'
 
 const app = express()
 
@@ -24,6 +25,7 @@ const healthHandler: RequestHandler = (_req, res) => {
 }
 
 app.get(`${env.API_PREFIX}/health`, healthHandler)
+app.use(`${env.API_PREFIX}/auth`, authRouter)
 
 app.use(((_err, _req, res, _next) => {
   res.status(500).json({
