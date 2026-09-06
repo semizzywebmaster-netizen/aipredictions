@@ -1,0 +1,17 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Phase 02 foundation: application models are introduced incrementally in later phases.
+// Keeping the initial schema intentionally small makes the first migration safe and repeatable.
+model DatabaseHealth {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+
+  @@map("database_health")
+}
