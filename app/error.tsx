@@ -2,33 +2,34 @@
 
 import { useEffect } from 'react'
 
-export default function Error({
-  error,
-  reset,
-}: {
-  error: Error & { digest?: string }
-  reset: () => void
-}) {
+export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
-    console.error('PUNTER PREDICTION route error:', error)
+    console.error('PUNTER PREDICTION route error', error)
   }, [error])
 
   return (
-    <main className="flex min-h-[60vh] items-center justify-center px-4 py-12">
-      <section className="w-full max-w-lg rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
-        <h1 className="text-2xl font-semibold text-foreground">Something went wrong</h1>
-        <p className="mt-3 text-sm text-muted-foreground">
-          We could not load this page correctly. Please try again. Your account and saved data have not been deleted.
+    <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50 dark:bg-slate-950">
+      <div className="max-w-md w-full rounded-2xl border bg-white dark:bg-slate-900 p-8 text-center shadow-sm">
+        <div className="h-12 w-12 rounded-xl bg-red-100 dark:bg-red-900/30 mx-auto flex items-center justify-center text-red-600 font-bold">
+          !
+        </div>
+        <h2 className="mt-4 font-semibold">Something went wrong</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          We could not load this page correctly. Please try again.
         </p>
         <button
-          type="button"
           onClick={reset}
-          className="mt-6 inline-flex items-center justify-center rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+          className="mt-6 px-4 py-2 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 text-sm font-medium"
         >
           Try again
         </button>
-        <p className="mt-5 text-[11px] text-muted-foreground">18+ Responsible betting.</p>
-      </section>
-    </main>
+        {error.digest && (
+          <p className="mt-3 text-[10px] text-muted-foreground">Reference: {error.digest}</p>
+        )}
+        <div className="mt-4 text-[11px] text-muted-foreground">
+          If the problem persists, contact support. 18+ Responsible betting.
+        </div>
+      </div>
+    </div>
   )
 }
