@@ -1,16 +1,20 @@
 name: Backend CI
+
 on:
   push:
     branches: [main]
     paths: ['backend/**']
   pull_request:
     paths: ['backend/**']
+
 jobs:
   validate:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
+    env:
+      DATABASE_URL: mysql://ci:ci@127.0.0.1:3306/aipredictions_ci
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,3 +24,4 @@ jobs:
       - run: npx prisma validate
       - run: npm run db:generate
       - run: npm run typecheck
+      - run: npm run build
