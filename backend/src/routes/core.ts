@@ -67,7 +67,7 @@ r.get('/gamification/badges',async(_req,res)=>ok(res,{badges:[]}))
 r.get('/gamification/challenges',async(_req,res)=>ok(res,{challenges:[]}))
 r.get('/gamification/streak',requireAuth,async(req,res,next)=>{try{const p=await prisma.gamificationProfile.findUnique({where:{userId:req.auth!.sub as any}});ok(res,{streak:p?.streak||0})}catch(e){next(e)}})
 
-r.get('/community/feed',async(_req,res,next)=>{try{ok(res,{posts:await prisma.communityPost.findMany({where:{status:'PUBLISHED'},orderBy:{createdAt:'desc'},take:50}})}catch(e){next(e)}})
+r.get('/community/feed',async(_req,res,next)=>{try{const posts=await prisma.communityPost.findMany({where:{status:'PUBLISHED'},orderBy:{createdAt:'desc'},take:50});ok(res,{posts})}catch(e){next(e)}})
 r.get('/community/posts/:id',async(req,res,next)=>{try{ok(res,{post:await prisma.communityPost.findUnique({where:{id:Number(req.params.id)}})})}catch(e){next(e)}})
 r.post('/community/posts',requireAuth,async(req,res,next)=>{try{const post=await prisma.communityPost.create({data:{userId:req.auth!.sub as any,content:String(req.body?.content||'')}});ok(res,{post})}catch(e){next(e)}})
 r.post('/community/posts/:id/like',requireAuth,async(_req,res)=>ok(res,{liked:true}))
