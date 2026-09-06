@@ -5,9 +5,9 @@ import { env } from './config/env'
 import authRouter from './routes/auth'
 import usersRouter from './routes/users'
 import sportsRouter from './routes/sports'
+import leaguesRouter from './routes/leagues'
 
 const app = express()
-
 app.disable('x-powered-by')
 app.use(helmet())
 app.use(cors({ origin: env.FRONTEND_URL, credentials: true }))
@@ -22,6 +22,7 @@ app.get(`${env.API_PREFIX}/health`, healthHandler)
 app.use(`${env.API_PREFIX}/auth`, authRouter)
 app.use(`${env.API_PREFIX}/users`, usersRouter)
 app.use(`${env.API_PREFIX}/sports`, sportsRouter)
+app.use(`${env.API_PREFIX}/leagues`, leaguesRouter)
 
 app.use(((_err, _req, res, _next) => {
   res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' } })
