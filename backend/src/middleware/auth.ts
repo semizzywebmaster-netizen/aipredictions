@@ -2,43 +2,7 @@ import type { RequestHandler } from 'express'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { env } from '../config/env'
 import { prisma } from '../lib/prisma'
-
-type TokenPayload = { sub: string; role: string; exp: number }
-
-declare global { namespace Express { interface Request { auth?: TokenPayload } } }
-
-function verifyToken(token: string): TokenPayload | null {
-  const parts = token.split('.')
-  if (parts.length !== 3) return null
-  const [header, payload, signature] = parts
-  if (!header || !payload || !signature) return null
-  const expected = createHmac('sha256', env.JWT_ACCESS_SECRET).update(`${header}.${payload}`).digest('base64url')
-  const a = Buffer.from(signature)
-  const b = Buffer.from(expected)
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null
-  try {
-    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as TokenPayload
-    if (!parsed.sub || !parsed.exp || parsed.exp <= Math.floor(Date.now() / 1000)) return null
-    return parsed
-  } catch { return null }
-}
-
-export const requireAuth: RequestHandler = async (req, res, next) => {
-  const authorization = req.get('authorization')
-  if (!authorization?.startsWith('Bearer ')) {
-    res.status(401).json({ success: false, error: { code: 'UNAUTHORIZED', message: 'Authentication is required.' } })
-    return
-  }
-  const payload = verifyToken(authorization.slice(7).trim())
-  if (!payload) {
-    res.status(401).json({ success: false, error: { code: 'INVALID_TOKEN', message: 'The access token is invalid or expired.' } })
-    return
-  }
-  const user = await prisma.user.findUnique({ where: { id: Number(payload.sub) }, select: { id: true, status: true, role: true } })
-  if (!user || user.status !== 'ACTIVE') {
-    res.status(401).json({ success: false, error: { code: 'ACCOUNT_UNAVAILABLE', message: 'The account is unavailable.' } })
-    return
-  }
-  req.auth = { sub: String(user.id), role: user.role, exp: payload.exp }
-  next()
-}
+type TokenPayload={sub:string;role:string;exp:number}
+declare global {namespace Express {interface Request {auth?:{sub:number;role:string;exp:number}}}}
+function verifyToken(token:string):TokenPayload|null{const parts=token.split('.');if(parts.length!==3)return null;const [header,payload,signature]=parts;if(!header||!payload||!signature)return null;const expected=createHmac('sha256',env.JWT_ACCESS_SECRET).update(`${header}.${payload}`).digest('base64url');const a=Buffer.from(signature),b=Buffer.from(expected);if(a.length!==b.length||!timingSafeEqual(a,b))return null;try{const parsed=JSON.parse(Buffer.from(payload,'base64url').toString('utf8')) as TokenPayload;if(!parsed.sub||!parsed.exp||parsed.exp<=Math.floor(Date.now()/1000))return null;const id=Number(parsed.sub);return Number.isInteger(id)&&id>0?parsed:null}catch{return null}}
+export const requireAuth:RequestHandler=async(req,res,next)=>{try{const authorization=req.get('authorization');if(!authorization?.startsWith('Bearer ')){res.status(401).json({success:false,error:{code:'UNAUTHORIZED',message:'Authentication is required.'}});return}const payload=verifyToken(authorization.slice(7).trim());if(!payload){res.status(401).json({success:false,error:{code:'INVALID_TOKEN',message:'The access token is invalid or expired.'}});return}const user=await prisma.user.findUnique({where:{id:Number(payload.sub)},select:{id:true,status:true,role:true}});if(!user||user.status!=='ACTIVE'){res.status(401).json({success:false,error:{code:'ACCOUNT_UNAVAILABLE',message:'The account is unavailable.'}});return}req.auth={sub:user.id,role:user.role,exp:payload.exp};next()}catch(error){next(error)}}
