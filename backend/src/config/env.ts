@@ -15,6 +15,7 @@ const envSchema = z.object({
   SMTP_PASSWORD: z.string().min(1).optional(),
   SMTP_FROM: z.string().email().optional(),
   EMAIL_VERIFICATION_URL: z.string().url().default('http://localhost:3000/verify-email'),
+  PASSWORD_RESET_URL: z.string().url().default('http://localhost:3000/reset-password'),
   SMS_PROVIDER: z.enum(['disabled', 'log']).default('disabled'),
 })
 
