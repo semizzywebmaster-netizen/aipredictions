@@ -4,6 +4,7 @@ import helmet from 'helmet'
 import { env } from './config/env'
 import authRouter from './routes/auth'
 import usersRouter from './routes/users'
+import sportsRouter from './routes/sports'
 
 const app = express()
 
@@ -20,6 +21,7 @@ const healthHandler: RequestHandler = (_req, res) => {
 app.get(`${env.API_PREFIX}/health`, healthHandler)
 app.use(`${env.API_PREFIX}/auth`, authRouter)
 app.use(`${env.API_PREFIX}/users`, usersRouter)
+app.use(`${env.API_PREFIX}/sports`, sportsRouter)
 
 app.use(((_err, _req, res, _next) => {
   res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'An unexpected server error occurred.' } })
