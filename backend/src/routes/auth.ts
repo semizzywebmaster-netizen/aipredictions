@@ -5,8 +5,9 @@ import { prisma } from '../lib/prisma'
 import { hashPassword, verifyPassword } from '../utils/password'
 import { createAccessToken } from '../utils/jwt'
 import { requireAuth } from '../middleware/auth'
-import { sendVerificationEmail } from '../services/email'
+import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email'
 import { sendPhoneOtp } from '../services/sms'
+import { consumePasswordResetToken, createPasswordResetToken } from '../services/password-reset'
 
 const router = Router()
 const registerSchema = z.object({ email: z.string().trim().toLowerCase().email().max(191), password: z.string().min(8).max(128), firstName: z.string().trim().min(1).max(100).optional(), lastName: z.string().trim().min(1).max(100).optional(), phone: z.string().trim().min(7).max(32).optional() })
@@ -15,6 +16,8 @@ const refreshSchema = z.object({ refreshToken: z.string().min(32).max(512) })
 const verifyEmailSchema = z.object({ code: z.string().trim().min(32).max(512) })
 const phoneOtpSchema = z.object({ phone: z.string().trim().min(7).max(32) })
 const verifyPhoneSchema = z.object({ phone: z.string().trim().min(7).max(32), code: z.string().regex(/^\d{6}$/) })
+const forgotPasswordSchema = z.object({ email: z.string().trim().toLowerCase().email().max(191) })
+const resetPasswordSchema = z.object({ token: z.string().trim().min(32).max(512), password: z.string().min(8).max(128) })
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex')
 
 const registerHandler: RequestHandler = async (req, res, next) => {
@@ -57,8 +60,7 @@ const refreshHandler: RequestHandler = async (req, res, next) => {
   try {
     const parsed = refreshSchema.safeParse(req.body)
     if (!parsed.success) { res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'A valid refresh token is required.' } }); return }
-    const tokenHash = hashToken(parsed.data.refreshToken)
-    const session = await prisma.session.findUnique({ where: { tokenHash }, include: { user: true } })
+    const session = await prisma.session.findUnique({ where: { tokenHash: hashToken(parsed.data.refreshToken) }, include: { user: true } })
     if (!session || session.revokedAt || session.expiresAt <= new Date() || session.user.status !== 'ACTIVE') { res.status(401).json({ success: false, error: { code: 'INVALID_REFRESH_TOKEN', message: 'The refresh token is invalid or expired.' } }); return }
     const newRefreshToken = randomBytes(48).toString('base64url')
     await prisma.session.update({ where: { id: session.id }, data: { tokenHash: hashToken(newRefreshToken), expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) } })
@@ -73,11 +75,7 @@ const verifyEmailHandler: RequestHandler = async (req, res, next) => {
     if (!parsed.success) { res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'A valid verification code is required.' } }); return }
     const token = await prisma.authToken.findUnique({ where: { tokenHash: hashToken(parsed.data.code) }, include: { user: true } })
     if (!token || token.type !== 'EMAIL_VERIFICATION' || token.consumedAt || token.expiresAt <= new Date()) { res.status(400).json({ success: false, error: { code: 'INVALID_VERIFICATION_CODE', message: 'The verification code is invalid or expired.' } }); return }
-    await prisma.$transaction([
-      prisma.authToken.update({ where: { id: token.id }, data: { consumedAt: new Date() } }),
-      prisma.user.update({ where: { id: token.userId }, data: { emailVerifiedAt: new Date() } }),
-      prisma.auditLog.create({ data: { userId: token.userId, action: 'AUTH_EMAIL_VERIFIED', entity: 'User', entityId: String(token.userId), ipAddress: req.ip, userAgent: req.get('user-agent') ?? undefined } }),
-    ])
+    await prisma.$transaction([prisma.authToken.update({ where: { id: token.id }, data: { consumedAt: new Date() } }), prisma.user.update({ where: { id: token.userId }, data: { emailVerifiedAt: new Date() } }), prisma.auditLog.create({ data: { userId: token.userId, action: 'AUTH_EMAIL_VERIFIED', entity: 'User', entityId: String(token.userId), ipAddress: req.ip, userAgent: req.get('user-agent') ?? undefined } })])
     res.json({ success: true, data: { message: 'Email verified successfully.' } })
   } catch (error) { next(error) }
 }
@@ -108,12 +106,34 @@ const verifyPhoneHandler: RequestHandler = async (req, res, next) => {
     if (user.phoneVerifiedAt) { res.json({ success: true, data: { message: 'Phone number is already verified.' } }); return }
     const token = await prisma.authToken.findFirst({ where: { userId: user.id, type: 'PHONE_OTP', tokenHash: hashToken(parsed.data.code), consumedAt: null, expiresAt: { gt: new Date() } } })
     if (!token) { res.status(400).json({ success: false, error: { code: 'INVALID_PHONE_OTP', message: 'The phone verification code is invalid or expired.' } }); return }
-    await prisma.$transaction([
-      prisma.authToken.update({ where: { id: token.id }, data: { consumedAt: new Date() } }),
-      prisma.user.update({ where: { id: user.id }, data: { phoneVerifiedAt: new Date() } }),
-      prisma.auditLog.create({ data: { userId: user.id, action: 'AUTH_PHONE_VERIFIED', entity: 'User', entityId: String(user.id), ipAddress: req.ip, userAgent: req.get('user-agent') ?? undefined } }),
-    ])
+    await prisma.$transaction([prisma.authToken.update({ where: { id: token.id }, data: { consumedAt: new Date() } }), prisma.user.update({ where: { id: user.id }, data: { phoneVerifiedAt: new Date() } }), prisma.auditLog.create({ data: { userId: user.id, action: 'AUTH_PHONE_VERIFIED', entity: 'User', entityId: String(user.id), ipAddress: req.ip, userAgent: req.get('user-agent') ?? undefined } })])
     res.json({ success: true, data: { message: 'Phone number verified successfully.' } })
+  } catch (error) { next(error) }
+}
+
+const forgotPasswordHandler: RequestHandler = async (req, res, next) => {
+  try {
+    const parsed = forgotPasswordSchema.safeParse(req.body)
+    if (!parsed.success) { res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'A valid email address is required.' } }); return }
+    const user = await prisma.user.findUnique({ where: { email: parsed.data.email }, select: { id: true, email: true, firstName: true, status: true } })
+    if (user?.status === 'ACTIVE') {
+      const { token } = await createPasswordResetToken(user.id)
+      try { await sendPasswordResetEmail(user.email, user.firstName, token) } catch { /* Do not expose delivery details. */ }
+      await prisma.auditLog.create({ data: { userId: user.id, action: 'AUTH_PASSWORD_RESET_REQUESTED', entity: 'User', entityId: String(user.id), ipAddress: req.ip, userAgent: req.get('user-agent') ?? undefined } })
+    }
+    res.json({ success: true, data: { message: 'If an account exists for this email, a password reset link has been sent.' } })
+  } catch (error) { next(error) }
+}
+
+const resetPasswordHandler: RequestHandler = async (req, res, next) => {
+  try {
+    const parsed = resetPasswordSchema.safeParse(req.body)
+    if (!parsed.success) { res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'A valid reset token and password are required.' } }); return }
+    const token = await consumePasswordResetToken(parsed.data.token)
+    if (!token) { res.status(400).json({ success: false, error: { code: 'INVALID_RESET_TOKEN', message: 'The password reset token is invalid or expired.' } }); return }
+    const passwordHash = await hashPassword(parsed.data.password)
+    await prisma.$transaction([prisma.authToken.update({ where: { id: token.id }, data: { consumedAt: new Date() } }), prisma.user.update({ where: { id: token.userId }, data: { passwordHash } }), prisma.session.updateMany({ where: { userId: token.userId, revokedAt: null }, data: { revokedAt: new Date() } }), prisma.auditLog.create({ data: { userId: token.userId, action: 'AUTH_PASSWORD_RESET_COMPLETED', entity: 'User', entityId: String(token.userId), ipAddress: req.ip, userAgent: req.get('user-agent') ?? undefined } })])
+    res.json({ success: true, data: { message: 'Password reset successfully. Please sign in again.' } })
   } catch (error) { next(error) }
 }
 
@@ -141,6 +161,8 @@ router.post('/refresh', refreshHandler)
 router.post('/verify-email', verifyEmailHandler)
 router.post('/phone-otp', phoneOtpHandler)
 router.post('/verify-phone', verifyPhoneHandler)
+router.post('/forgot-password', forgotPasswordHandler)
+router.post('/reset-password', resetPasswordHandler)
 router.get('/me', requireAuth, meHandler)
 router.post('/logout', requireAuth, logoutHandler)
 
