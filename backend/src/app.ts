@@ -11,9 +11,11 @@ import playersRouter from './routes/players'
 import fixturesRouter from './routes/fixtures'
 import predictionsRouter from './routes/predictions'
 import coreRouter from './routes/core'
-const app=express();app.disable('x-powered-by');app.use(helmet());app.use(cors({origin:env.FRONTEND_URL,credentials:true}));app.use(express.json({limit:'1mb'}));app.use(express.urlencoded({extended:true,limit:'1mb'}))
+import { requestId, rateLimit } from './middleware/security'
+const app=express();app.disable('x-powered-by');app.use(helmet());app.use(cors({origin:env.FRONTEND_URL,credentials:true}));app.use(requestId);app.use(rateLimit());app.use(express.json({limit:'1mb'}));app.use(express.urlencoded({extended:true,limit:'1mb'}))
 const healthHandler:RequestHandler=(_req,res)=>res.status(200).json({success:true,data:{status:'ok',service:'aipredictions-backend',version:'1.0.0',timestamp:new Date().toISOString()}})
 app.get(`${env.API_PREFIX}/health`,healthHandler)
 app.use(`${env.API_PREFIX}/auth`,authRouter);app.use(`${env.API_PREFIX}/users`,usersRouter);app.use(`${env.API_PREFIX}/sports`,sportsRouter);app.use(`${env.API_PREFIX}/leagues`,leaguesRouter);app.use(`${env.API_PREFIX}/teams`,teamsRouter);app.use(`${env.API_PREFIX}/players`,playersRouter);app.use(`${env.API_PREFIX}/fixtures`,fixturesRouter);app.use(`${env.API_PREFIX}/predictions`,predictionsRouter);app.use(env.API_PREFIX,coreRouter)
+app.use(((_req,res)=>res.status(404).json({success:false,error:{code:'NOT_FOUND',message:'API endpoint not found.'}})) as RequestHandler)
 app.use(((_err,_req,res,_next)=>res.status(500).json({success:false,error:{code:'INTERNAL_SERVER_ERROR',message:'An unexpected server error occurred.'}})) as ErrorRequestHandler)
 export default app
